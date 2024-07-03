@@ -11,8 +11,8 @@ volatile uint32_t lastPPMTime = 0;
 volatile bool ppmUpdated = false;
 
 // Constants for motor control
-const float wheelDiameterCm = 44.0;
-const float encoderResolution = 1200.0;
+const float wheelDiameterCm = 44.0;  //Diamter of the wheel when the pressure is at 35psi 
+const float encoderResolution = 1200.0; //Pulses per rotation, increasing the value will increase the sensitivity reduces the travelling distance
 const float cmPerPulse = (PI * wheelDiameterCm) / encoderResolution;
 
 volatile long encoderPulsesA = 0;
@@ -38,10 +38,15 @@ const int REAR_LEFT_ENCODER_B = 32;
 const int FRONT_RIGHT_ENCODER_A = 26;
 const int FRONT_RIGHT_ENCODER_B = 25;
 
+// Emergency stop pin
+const int EMERGENCY_STOP_PIN = 27;
+volatile bool emergencyStop = false;
+
 // Function Prototypes
 void IRAM_ATTR handlePPMInterrupt();
 void IRAM_ATTR encoderISRA();
 void IRAM_ATTR encoderISRB();
+void IRAM_ATTR handleEmergencyStop();
 void moveForward(int speed);
 void moveBackward(int speed);
 void stopMotors();
@@ -80,10 +85,21 @@ void setup() {
   pinMode(PPM_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PPM_PIN), handlePPMInterrupt, FALLING);
 
+  pinMode(EMERGENCY_STOP_PIN, INPUT_PULLUP); 
+  attachInterrupt(digitalPinToInterrupt(EMERGENCY_STOP_PIN), handleEmergencyStop, CHANGE);
+
   Serial.println("Setup complete. Drive system ready.");
 }
 
 void loop() {
+  if (emergencyStop) {
+    stopMotors();
+    Serial.println("Emergency stop engaged. Motors stopped.");
+    while (emergencyStop) {
+      delay(10);
+    }
+  }
+
   if (alertReceived) {
     prioritizeStop();
     alertReceived = false;
@@ -120,6 +136,7 @@ void stopMotors() {
   Serial.println("Motors stopped.");
 }
 
+//Function for smoothly reduce the speed of the motor, which is for receving a distance measurement to proceed
 void smoothStopMotors() {
   int currentSpeed = 255; // Maximum speed
   while (currentSpeed > 0) {
@@ -138,6 +155,7 @@ void smoothStopMotors() {
   Serial.println("Motors smoothly stopped.");
 }
 
+//Emergency stop function
 void prioritizeStop() {
   noInterrupts();
   stopMotors();
@@ -162,7 +180,7 @@ void moveForwardDistanceSmoothly(int maxSpeed, float distanceCm) {
     if (alertReceived) {
       prioritizeStop();
       alertReceived = false;
-      Serial.println("Alert received during movement! Emergency stop executed.");
+      Serial.println("Alert received during movement! Emergency stop executed."); //Killing the normal driving for emergency stop
       return;
     }
 
@@ -212,6 +230,10 @@ void IRAM_ATTR encoderISRB() {
     encoderPulsesB += (digitalRead(FRONT_RIGHT_ENCODER_B) == currentStateB) ? -1 : 1;
     lastStateB = currentStateB;
   }
+}
+
+void IRAM_ATTR handleEmergencyStop() {
+  emergencyStop = digitalRead(EMERGENCY_STOP_PIN) == HIGH;
 }
 
 void onDataReceived(const uint8_t *mac, const uint8_t *incomingData, int len) {
